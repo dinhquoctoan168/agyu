@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# User conversation runtime data, attachments & snapshots
+.agy_wrap/attachments/
+.agy_wrap/snapshots/
+.agy_wrap/deep_think_plans/
+.agy_wrap/deep_think_sessions/
+
+# Temporary test folders
+--check-only/
+bugs/
+
+# Local hooks dynamically generated per-machine
+.agents/hooks.json
+
+# Environment and editor files
+.env
+.venv
+env/
+venv/
+.idea/
+.vscode/
+*.swp
+*.swo

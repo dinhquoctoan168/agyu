@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Antigravity Desktop</title>
+  <link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Drag & Drop Fullscreen Overlay -->
+  <div id="drag-overlay" class="drag-overlay hidden">
+    <div class="drag-overlay-box">
+      <div class="drag-icon">📥</div>
+      <div class="drag-text">Kéo thả tệp vào đây để đính kèm</div>
+      <div class="drag-subtext">Hỗ trợ mã nguồn, tài liệu và hình ảnh</div>
+    </div>
+  </div>
+
+  <!-- Sidebar Overlay -->
+  <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+  <!-- Sidebar Drawer: Past Conversations -->
+  <aside id="sidebar-drawer" class="sidebar-drawer">
+    <div class="sidebar-header">
+      <div class="sidebar-title">
+        <span class="sidebar-icon">💬</span>
+        <span>Lịch sử hội thoại</span>
+      </div>
+      <button id="btn-close-sidebar" class="btn-icon" title="Đóng menu">&times;</button>
+    </div>
+
+    <div class="sidebar-action">
+      <button id="btn-new-chat" class="btn-new-chat">
+        <span>+</span> Cuộc hội thoại mới
+      </button>
+    </div>
+
+    <!-- 3 Tabs Navigation -->
+    <div class="sidebar-tabs" id="sidebar-tabs">
+      <button class="sidebar-tab active" data-tab="current" id="tab-btn-current">
+        <span class="tab-label">📁 Thư mục</span>
+        <span class="tab-badge" id="tab-count-current">0</span>
+      </button>
+      <button class="sidebar-tab" data-tab="recent" id="tab-btn-recent">
+        <span class="tab-label">🕒 Gần đây</span>
+        <span class="tab-badge" id="tab-count-recent">0</span>
+      </button>
+      <button class="sidebar-tab" data-tab="catalog" id="tab-btn-catalog">
+        <span class="tab-label">🗂️ Danh mục</span>
+        <span class="tab-badge" id="tab-count-catalog">0</span>
+      </button>
+    </div>
+
+    <div class="sidebar-scroll" id="sidebar-scroll">
+      <!-- Tab 1: Current Workspace -->
+      <div class="tab-pane active" id="pane-current">
+        <div class="conv-group-title">
+          <span id="label-current-workspace">📁 THƯ MỤC HIỆN TẠI</span>
+          <span class="group-count" id="count-current">0</span>
+        </div>
+        <div class="conv-list" id="list-current-workspace">
+          <div class="conv-empty">Chưa có cuộc hội thoại nào</div>
+        </div>
+        <div class="see-more-wrap" id="wrap-see-more-current" style="display: none;">
+          <button class="btn-see-more" id="btn-see-more-current">
+            <span class="see-more-icon">📥</span> Xem thêm hội thoại cũ
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab 2: Recent 20 -->
+      <div class="tab-pane" id="pane-recent" style="display: none;">
+        <div class="conv-group-title">
+          <span>🕒 20 HỘI THOẠI GẦN ĐÂY NHẤT</span>
+          <span class="group-count" id="count-recent">0</span>
+        </div>
+        <div class="conv-list" id="list-recent-conversations">
+          <div class="conv-empty">Không có hội thoại gần đây</div>
+        </div>
+      </div>
+
+      <!-- Tab 3: Workspaces Catalog -->
+      <div class="tab-pane" id="pane-catalog" style="display: none;">
+        <div class="conv-group-title">
+          <span>🗂️ DANH MỤC CÁC THƯ MỤC</span>
+          <span class="group-count" id="count-catalog">0</span>
+        </div>
+        <div class="catalog-list" id="list-catalog-workspaces">
+          <div class="conv-empty">Không có thư mục nào</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- File Context Menu -->
+  <div id="file-context-menu" class="context-menu hidden">
+    <div class="context-menu-item" id="ctx-open-file">
+      <span class="ctx-icon">📄</span>
+      <span>Mở tệp</span>
+    </div>
+    <div class="context-menu-item" id="ctx-open-folder">
+      <span class="ctx-icon">📁</span>
+      <span>Mở thư mục chứa</span>
+    </div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" id="ctx-copy-path">
+      <span class="ctx-icon">📋</span>
+      <span>Sao chép đường dẫn</span>
+    </div>
+  </div>
+
+  <!-- Real-time Tool Guardrail Violation Modal -->
+  <div id="guardrail-modal" class="guardrail-modal-overlay hidden">
+    <div class="guardrail-modal-card">
+      <div class="guardrail-header">
+        <div class="guardrail-icon-wrapper">
+          <span class="guardrail-warn-icon">⚠️</span>
+        </div>
+        <div class="guardrail-title-group">
+          <h2 class="guardrail-title">Cảnh báo: Tác động tệp ngoài kế hoạch</h2>
+          <span class="guardrail-badge">TIẾN TRÌNH ĐÃ TẠM DỪNG</span>
+        </div>
+      </div>
+      <div class="guardrail-body">
+        <p class="guardrail-desc">
+          Công cụ <code id="guardrail-tool-name">write_file</code> đang thao tác lên tệp <strong>không nằm trong kế hoạch đã duyệt</strong>:
+        </p>
+        <div class="guardrail-file-highlight">
+          <span class="file-icon">📄</span>
+          <span id="guardrail-file-path" class="file-path">path/to/file</span>
+        </div>
+
+        <div class="guardrail-plan-preview">
+          <div class="guardrail-plan-title">📋 Danh sách tệp đã được duyệt trong kế hoạch:</div>
+          <div id="guardrail-approved-list" class="guardrail-approved-list">
+            <!-- Render list of approved files dynamically -->
+          </div>
+        </div>
+      </div>
+      <div class="guardrail-actions">
+        <button id="btn-guardrail-reject" class="btn-guardrail btn-reject" title="Dừng tiến trình và gửi lại yêu cầu điều chỉnh">
+          <span class="btn-icon">⏹</span>
+          <span>Dừng & Gửi lại yêu cầu</span>
+        </button>
+        <button id="btn-guardrail-allow" class="btn-guardrail btn-allow" title="Cho phép sửa tệp này và tiếp tục tiến trình">
+          <span class="btn-icon">✓</span>
+          <span>Cho phép tiếp tục</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Deep Think 5 Level Tree Modal -->
+  <div id="deep-think-modal" class="deep-think-modal-overlay hidden">
+    <div class="deep-think-modal-card">
+      <div class="deep-think-header">
+        <div class="deep-think-title-group">
+          <span class="deep-think-icon">🧠</span>
+          <div class="deep-think-titles">
+            <h2 class="deep-think-title">Deep Think 5 Level</h2>
+            <span class="deep-think-subtitle" id="deep-think-subtitle">Cây phân rã nhiệm vụ 5 tầng</span>
+          </div>
+        </div>
+        <div class="deep-think-header-actions">
+          <select id="sel-max-levels" class="deep-think-select" title="Độ sâu phân rã tối đa">
+            <option value="2">Tối đa 2 tầng</option>
+            <option value="3">Tối đa 3 tầng</option>
+            <option value="4">Tối đa 4 tầng</option>
+            <option value="5" selected>Tối đa 5 tầng</option>
+          </select>
+          <label class="deep-think-toggle-label" title="Tự động tạo bước hợp nhất kết quả cho các cụm task cần tích hợp">
+            <input type="checkbox" id="chk-enable-synthesis" checked>
+            <span>🔄 Hợp nhất cụm</span>
+          </label>
+          <button id="btn-reset-deep-think" class="btn-deep-think-action" title="Xóa cây và bắt đầu phiên Deep Think mới">
+            🗑 Làm mới
+          </button>
+          <button id="btn-open-plan-md" class="btn-deep-think-action" title="Mở file Markdown kế hoạch trong hệ thống">
+            📄 Mở Markdown
+          </button>
+          <button id="btn-close-deep-think" class="btn-icon" title="Đóng">&times;</button>
+        </div>
+      </div>
+
+      <div class="deep-think-task-banner" id="deep-think-task-banner">
+        <div class="task-banner-label">Nhiệm vụ gốc:</div>
+        <div class="task-banner-text" id="deep-think-root-text">Chưa có nhiệm vụ nào</div>
+      </div>
+
+      <div class="deep-think-stats-bar" id="deep-think-stats-bar">
+        <div class="deep-stat-item">
+          <span class="stat-num" id="stat-total-nodes">0</span>
+          <span class="stat-label">Tổng Node</span>
+        </div>
+        <div class="deep-stat-item">
+          <span class="stat-num" id="stat-completed-nodes">0</span>
+          <span class="stat-label">Đã phân tích</span>
+        </div>
+        <div class="deep-stat-item">
+          <span class="stat-num" id="stat-atomic-nodes">0</span>
+          <span class="stat-label">Tối giản (Atomic)</span>
+        </div>
+        <div class="deep-stat-item">
+          <span class="stat-num" id="stat-pending-nodes">0</span>
+          <span class="stat-label">Đang chờ</span>
+        </div>
+      </div>
+
+      <div class="deep-think-levels-pills" id="deep-think-levels-pills">
+        <span class="level-pill" id="pill-lvl-1">Tầng 1: 0</span>
+        <span class="level-pill" id="pill-lvl-2">Tầng 2: 0</span>
+        <span class="level-pill" id="pill-lvl-3">Tầng 3: 0</span>
+        <span class="level-pill" id="pill-lvl-4">Tầng 4: 0</span>
+        <span class="level-pill" id="pill-lvl-5">Tầng 5: 0</span>
+      </div>
+
+      <div class="deep-think-tree-scroll" id="deep-think-tree-scroll">
+        <div class="deep-think-tree" id="deep-think-tree">
+          <div class="tree-empty">Chưa có cây phân rã. Nhập nhiệm vụ và bấm <strong>🧠 DEEP THINK</strong> để bắt đầu.</div>
+        </div>
+      </div>
+
+      <div class="deep-think-footer">
+        <div class="deep-think-status-message" id="deep-think-status-message">
+          Trạng thái: Sẵn sàng
+        </div>
+        <div class="deep-think-footer-buttons">
+          <button id="btn-pause-deep-think" class="btn-deep-think-action btn-pause hidden">⏸ Tạm dừng</button>
+          <button id="btn-stop-deep-think" class="btn-deep-think-action btn-stop hidden">⏹ Dừng lại</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main App Container -->
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <button id="btn-menu" class="btn-menu" title="Mở danh sách hội thoại">
+          <span class="menu-icon">☰</span>
+        </button>
+        <div class="app-logo">⚡</div>
+        <div class="header-info">
+          <div class="workspace-badge" id="workspace-badge" title="Thư mục làm việc">
+            <span class="folder-icon">📁</span>
+            <span class="workspace-name" id="workspace-name">Loading...</span>
+          </div>
+          <div class="conv-badge" id="conv-badge" title="Conversation ID">
+            <span class="conv-label">ID:</span>
+            <span class="conv-id" id="conv-id">Đang khởi tạo...</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-right">
+        <!-- Account Switcher Dropdown -->
+        <div class="account-selector" id="account-selector">
+          <div class="account-badge" id="account-badge" title="Tài khoản Antigravity đang hoạt động">
+            <span class="account-icon">👤</span>
+            <span class="account-email" id="account-email">Đang tải...</span>
+            <span class="account-arrow">▾</span>
+          </div>
+          <div class="account-dropdown hidden" id="account-dropdown">
+            <div class="account-dropdown-header">Tài khoản Antigravity</div>
+            <div class="account-list" id="account-list">
+              <!-- Rendered via JS -->
+            </div>
+            <div class="account-dropdown-footer">
+              <span class="account-hint">Dùng lệnh <code>agy-account</code> trên terminal để thêm/quản lý tài khoản.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Deep Think Tree button in header -->
+        <button id="btn-deep-think-tree" class="btn-pin" title="Xem cây kế hoạch Deep Think 5 Level">
+          <span class="pin-icon">🧠</span>
+          <span id="deep-think-header-badge" class="deep-think-header-badge hidden">5L</span>
+        </button>
+
+        <!-- Free to go button in header -->
+        <button id="btn-free-to-go" class="btn-pin btn-free-header" title="Chế độ Free to go: ĐANG TẮT (Click để BẬT tự hành không giới hạn kế hoạch)" type="button">
+          <span class="free-to-go-icon">🚀</span>
+        </button>
+
+        <button id="btn-pin" class="btn-pin" title="Ghim cửa sổ luôn nổi trên cùng (Always on Top)">
+          <span class="pin-icon">📌</span>
+        </button>
+        <div class="status-indicator" id="status-indicator">
+          <span class="status-dot ready" id="status-dot"></span>
+          <span class="status-text" id="status-text">Đang kết nối</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Header Quota Progress Lines -->
+    <div class="quota-container" id="quota-container">
+      <div class="quota-line quota-week" id="quota-week" title="Định mức tuần: Đang tính toán...">
+        <div class="quota-fill" id="quota-week-fill" style="width: 0%;"></div>
+      </div>
+      <div class="quota-line quota-5h" id="quota-5h" title="Định mức 5h: Đang tính toán...">
+        <div class="quota-fill" id="quota-5h-fill" style="width: 0%;"></div>
+      </div>
+    </div>
+
+    <!-- Chat Messages Scroll Area -->
+    <main class="chat-container" id="chat-container">
+      <div class="messages-list" id="messages-list">
+        <!-- Welcome Hero Banner -->
+        <div class="welcome-hero" id="welcome-hero">
+          <div class="hero-icon">⚡</div>
+          <h1 class="hero-title">Antigravity Desktop</h1>
+          <p class="hero-desc">Môi trường làm việc AI Agent toàn năng cho dự án của bạn.</p>
+          <div class="hero-features">
+            <div class="feature-card">
+              <span class="feat-icon">📋</span>
+              <div class="feat-text">
+                <strong>Dán ảnh tức thì:</strong> Nhấn <kbd>Ctrl+V</kbd> để dán ảnh chụp màn hình trực tiếp từ clipboard.
+              </div>
+            </div>
+            <div class="feature-card">
+              <span class="feat-icon">📂</span>
+              <div class="feat-text">
+                <strong>Kéo thả tệp:</strong> Kéo trực tiếp file hoặc thư mục từ hệ thống vào cửa sổ chat.
+              </div>
+            </div>
+            <div class="feature-card">
+              <span class="feat-icon">📜</span>
+              <div class="feat-text">
+                <strong>Hội thoại cũ:</strong> Bấm <kbd>☰ Menu</kbd> để xem và nạp các phiên làm việc trước đó.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Bottom Input Area -->
+    <footer class="input-section">
+      <!-- Attached files preview strip -->
+      <div class="attachments-strip hidden" id="attachments-strip"></div>
+
+      <!-- Active Processes Strip (right above input box) -->
+      <div class="active-processes-strip hidden" id="active-processes-strip">
+        <div class="active-processes-header">
+          <div class="active-processes-title-wrap">
+            <span class="active-processes-icon">⚙️</span>
+            <span class="active-processes-title">Tiến trình phụ đang chạy</span>
+            <span class="active-processes-count" id="active-processes-count">0</span>
+          </div>
+          <button id="btn-kill-all-procs" class="btn-kill-all hidden" title="Tắt tất cả tiến trình phụ">
+            ✕ Tắt tất cả
+          </button>
+        </div>
+        <div class="active-processes-list" id="active-processes-list">
+          <!-- Rendered via JS -->
+        </div>
+      </div>
+
+      <!-- Running Lights Strip (Active when busy) -->
+      <div class="running-lights-strip hidden" id="running-lights-strip" aria-hidden="true">
+        <div class="running-lights-track" id="running-lights-track"></div>
+      </div>
+
+      <!-- Input Form -->
+      <div class="input-box-wrapper" id="input-box-wrapper">
+        <label class="btn-attach" title="Chọn file đính kèm">
+          <input type="file" id="file-picker" multiple style="display: none;">
+          📎
+        </label>
+        <textarea
+          id="prompt-input"
+          class="prompt-input"
+          rows="1"
+          placeholder="Nhập yêu cầu, dán ảnh (Ctrl+V) hoặc kéo thả file vào đây... (Shift+Enter để xuống dòng)"
+        ></textarea>
+        <div class="input-actions">
+          <button id="btn-send" class="btn-send" title="Gửi thảo luận thông thường" disabled>
+            <span>Gửi</span> ➤
+          </button>
+          <button id="btn-action" class="btn-action" title="Click để gửi ACTION | Click phải: Bật/Tắt chế độ Free to go">
+            <span id="btn-action-label">⚡ ACTION</span>
+            <span id="action-mode-badge" class="action-mode-badge hidden">FREE</span>
+          </button>
+          <div class="more-actions-wrapper" id="more-actions-wrapper">
+            <button id="btn-more-actions" class="btn-more-actions" title="Tác vụ bổ sung" type="button">
+              <span>•••</span>
+            </button>
+            <div id="more-actions-menu" class="more-actions-menu hidden">
+              <button id="btn-rollback" class="btn-rollback" title="Khôi phục tệp về trạng thái snapshot trước ACTION gần nhất của phiên này" type="button">
+                <span>⏪</span> Hoàn tác ACTION
+              </button>
+              <button id="btn-deep-think" class="btn-deep-think" title="Chế độ Deep Think 5 Level: Phân rã nhiệm vụ thành cây tối đa 5 tầng" type="button">
+                <span class="deep-think-btn-icon">🧠</span>
+                <span id="btn-deep-think-label">DEEP THINK</span>
+                <span id="deep-think-mode-badge" class="deep-think-mode-badge hidden">5L</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="input-hints">
+        <span>Enter để gửi • Shift+Enter xuống dòng • 🚀 Free to go: Tự do thực hiện không bị chặn kế hoạch • 🧠 DEEP THINK: Phân rã 5 tầng</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="vendor/katex/katex.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

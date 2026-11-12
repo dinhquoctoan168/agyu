@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -e
+
+# Resolve real path of this script (dereference symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+PROJECT_ROOT="$(cd -P "$SCRIPT_DIR/.." && pwd)"
+
+# Target directory defaults to current working directory
+TARGET_DIR="$PWD"
+
+# Check if first arg is an existing directory
+if [ $# -gt 0 ] && [ -d "$1" ]; then
+    TARGET_DIR="$(cd "$1" && pwd)"
+    shift
+fi
+
+# Prefer X11/XWayland for rock-solid Drag & Drop and clipboard selection support
+export GDK_BACKEND="${GDK_BACKEND:-x11,wayland}"
+
+# Run the Python GTK3+WebKit2 desktop app in a detached background session
+nohup setsid python3 "$PROJECT_ROOT/app/main.py" "$TARGET_DIR" "$@" >/dev/null 2>&1 &
+disown $! 2>/dev/null || true
+
+# Give the process a brief moment to spawn
+sleep 0.15

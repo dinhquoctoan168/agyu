@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+import os
+import sys
+import json
+import shutil
+import argparse
+from datetime import datetime
+
+try:
+    import dbus
+except ImportError:
+    dbus = None
+
+GEMINI_DIR = os.path.expanduser("~/.gemini")
+PROFILES_DIR = os.path.join(GEMINI_DIR, "profiles")
+GOOGLE_ACCOUNTS_FILE = os.path.join(GEMINI_DIR, "google_accounts.json")
+OAUTH_CREDS_FILE = os.path.join(GEMINI_DIR, "oauth_creds.json")
+
+
+def _get_secret_service():
+    if not dbus:
+        raise RuntimeError("Yêu cầu thư viện python dbus để tương tác với GNOME Keyring / Secret Service")
+    bus = dbus.SessionBus()
+    service = bus.get_object("org.freedesktop.secrets", "/org/freedesktop/secrets")
+    service_iface = dbus.Interface(service, "org.freedesktop.Secret.Service")
+    return bus, service_iface
+
+
+def get_current_keyring_secret():
+    """Lấy dữ liệu secret hiện tại từ GNOME Keyring."""
+    try:
+        bus, service_iface = _get_secret_service()
+        unlocked, _ = service_iface.SearchItems({"service": "gemini", "username": "antigravity"})
+        if not unlocked:
+            return None, None
+
+        session_path = service_iface.OpenSession("plain", "")[1]
+        item_obj = bus.get_object("org.freedesktop.secrets", unlocked[0])
+        item_iface = dbus.Interface(item_obj, "org.freedesktop.Secret.Item")
+        secret = item_iface.GetSecret(session_path)
+        secret_bytes = bytes(secret[2])
+        secret_data = json.loads(secret_bytes.decode("utf-8"))
+        return secret_data, unlocked[0]
+    except Exception as e:
+        return None, None
+
+
+def set_keyring_secret(secret_dict: dict):
+    """Ghi hoặc cập nhật secret 'antigravity' trên 'gemini' vào GNOME Keyring."""
+    bus, service_iface = _get_secret_service()
+    session_path = service_iface.OpenSession("plain", "")[1]
+    secret_bytes = json.dumps(secret_dict).encode("utf-8")
+    secret_struct = (
+        session_path,
+        dbus.ByteArray(b""),
+        dbus.ByteArray(secret_bytes),
+        "text/plain; charset=utf8"
+    )
+
+    unlocked, _ = service_iface.SearchItems({"service": "gemini", "username": "antigravity"})
+    if unlocked:
+        item_obj = bus.get_object("org.freedesktop.secrets", unlocked[0])
+        item_iface = dbus.Interface(item_obj, "org.freedesktop.Secret.Item")
+        item_iface.SetSecret(secret_struct)
+        return str(unlocked[0])
+    else:
+        col_obj = bus.get_object("org.freedesktop.secrets", "/org/freedesktop/secrets/aliases/default")
+        col_iface = dbus.Interface(col_obj, "org.freedesktop.Secret.Collection")
+        props = dbus.Dictionary({
+            "org.freedesktop.Secret.Item.Label": dbus.String("Password for 'antigravity' on 'gemini'"),
+            "org.freedesktop.Secret.Item.Attributes": dbus.Dictionary({
+                "service": "gemini",
+                "username": "antigravity",
+                "xdg:schema": "org.freedesktop.Secret.Generic"
+            }, signature="ss")
+        }, signature="sv")
+        res = col_iface.CreateItem(props, secret_struct, True)
+        return str(res[0])
+
+
+def delete_keyring_secret():
+    """Xóa secret hiện tại trong Keyring."""
+    try:
+        bus, service_iface = _get_secret_service()
+        unlocked, _ = service_iface.SearchItems({"service": "gemini", "username": "antigravity"})
+        for item_path in unlocked:
+            item_obj = bus.get_object("org.freedesktop.secrets", item_path)
+            item_iface = dbus.Interface(item_obj, "org.freedesktop.Secret.Item")
+            item_iface.Delete()
+        return True
+    except Exception:
+        return False
+
+
+def get_active_email():
+    """Lấy email đang hoạt động từ Keyring hoặc google_accounts.json."""
+    secret_data, _ = get_current_keyring_secret()
+    if secret_data and secret_data.get("id_token_email"):
+        return secret_data.get("id_token_email")
+
+    if os.path.exists(GOOGLE_ACCOUNTS_FILE):
+        try:
+            with open(GOOGLE_ACCOUNTS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("active")
+        except Exception:
+            pass
+    return None
+
+
+def get_current_account():
+    secret_data, _ = get_current_keyring_secret()
+    email = get_active_email()
+    expiry = None
+    auth_method = "consumer"
+    if secret_data:
+        token = secret_data.get("token", {})
+        expiry = token.get("expiry")
+        auth_method = secret_data.get("auth_method", "consumer")
+
+    return {
+        "email": email,
+        "auth_method": auth_method,
+        "expiry": expiry,
+        "is_authenticated": bool(secret_data and email)
+    }
+
+
+def save_current_profile(email=None):
+    secret_data, _ = get_current_keyring_secret()
+    if not email:
+        email = get_active_email()
+
+    if not email:
+        raise ValueError("Không thể xác định email hiện tại để lưu profile")
+
+    profile_dir = os.path.join(PROFILES_DIR, email)
+    os.makedirs(profile_dir, exist_ok=True)
+
+    if secret_data:
+        secret_path = os.path.join(profile_dir, "keyring_secret.json")
+        with open(secret_path, "w", encoding="utf-8") as f:
+            json.dump(secret_data, f, indent=2)
+
+    if os.path.exists(GOOGLE_ACCOUNTS_FILE):
+        shutil.copy2(GOOGLE_ACCOUNTS_FILE, os.path.join(profile_dir, "google_accounts.json"))
+
+    if os.path.exists(OAUTH_CREDS_FILE):
+        shutil.copy2(OAUTH_CREDS_FILE, os.path.join(profile_dir, "oauth_creds.json"))
+
+    meta_path = os.path.join(profile_dir, "profile_meta.json")
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "email": email,
+            "last_saved": datetime.now().isoformat(),
+            "auth_method": secret_data.get("auth_method") if secret_data else "consumer"
+        }, f, indent=2)
+
+    return profile_dir
+
+
+def list_profiles():
+    os.makedirs(PROFILES_DIR, exist_ok=True)
+    active_email = get_active_email()
+    profiles = []
+
+    for name in sorted(os.listdir(PROFILES_DIR)):
+        dir_path = os.path.join(PROFILES_DIR, name)
+        if not os.path.isdir(dir_path):
+            continue
+
+        meta_file = os.path.join(dir_path, "profile_meta.json")
+        email = name
+        last_saved = ""
+        auth_method = "consumer"
+        if os.path.exists(meta_file):
+            try:
+                with open(meta_file, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                    email = meta.get("email", name)
+                    last_saved = meta.get("last_saved", "")
+                    auth_method = meta.get("auth_method", "consumer")
+            except Exception:
+                pass
+
+        profiles.append({
+            "email": email,
+            "is_active": (email == active_email),
+            "last_saved": last_saved,
+            "auth_method": auth_method
+        })
+
+    # Nếu tài khoản đang active chưa từng lưu vào profile, bổ sung vào danh sách
+    if active_email and not any(p["email"] == active_email for p in profiles):
+        profiles.append({
+            "email": active_email,
+            "is_active": True,
+            "last_saved": "chưa lưu snapshot",
+            "auth_method": "consumer"
+        })
+
+    return profiles
+
+
+def switch_profile(target_email: str):
+    current_email = get_active_email()
+    if current_email:
+        try:
+            save_current_profile(current_email)
+        except Exception:
+            pass
+
+    profile_dir = os.path.join(PROFILES_DIR, target_email)
+    secret_path = os.path.join(profile_dir, "keyring_secret.json")
+    if not os.path.exists(secret_path):
+        raise FileNotFoundError(f"Không tìm thấy dữ liệu profile cho tài khoản '{target_email}'")
+
+    with open(secret_path, "r", encoding="utf-8") as f:
+        secret_data = json.load(f)
+
+    # 1. Cập nhật GNOME Keyring
+    set_keyring_secret(secret_data)
+
+    # 2. Cập nhật google_accounts.json
+    accounts_data = {"active": target_email, "old": []}
+    if os.path.exists(GOOGLE_ACCOUNTS_FILE):
+        try:
+            with open(GOOGLE_ACCOUNTS_FILE, "r", encoding="utf-8") as f:
+                old_accs = json.load(f)
+                old_list = old_accs.get("old", [])
+                prev_active = old_accs.get("active")
+                if prev_active and prev_active != target_email and prev_active not in old_list:
+                    old_list.append(prev_active)
+                if target_email in old_list:
+                    old_list.remove(target_email)
+                accounts_data["old"] = old_list
+        except Exception:
+            pass
+
+    with open(GOOGLE_ACCOUNTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(accounts_data, f, indent=2)
+
+    # 3. Đồng bộ oauth_creds.json
+    saved_creds = os.path.join(profile_dir, "oauth_creds.json")
+    if os.path.exists(saved_creds):
+        shutil.copy2(saved_creds, OAUTH_CREDS_FILE)
+
+    return True
+
+
+def remove_profile(email: str):
+    profile_dir = os.path.join(PROFILES_DIR, email)
+    if os.path.exists(profile_dir):
+        shutil.rmtree(profile_dir)
+        return True
+    return False
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Trình quản lý chuyển đổi tài khoản Antigravity (agy)")
+    subparsers = parser.add_subparsers(dest="command")
+
+    # Command: current
+    subparsers.add_parser("current", help="Xem tài khoản đang active")
+
+    # Command: list
+    list_p = subparsers.add_parser("list", help="Danh sách các profile tài khoản")
+    list_p.add_argument("--json", action="store_true", help="Xuất định dạng JSON")
+
+    # Command: save
+    save_p = subparsers.add_parser("save", help="Lưu tài khoản hiện tại vào profile")
+    save_p.add_argument("email", nargs="?", default=None, help="Email tài khoản (mặc định lấy theo tài khoản active)")
+
+    # Command: switch
+    switch_p = subparsers.add_parser("switch", help="Chuyển sang tài khoản chỉ định")
+    switch_p.add_argument("email", help="Email tài khoản đích cần chuyển sang")
+
+    # Command: add
+    subparsers.add_parser("add", help="Đăng xuất để thêm tài khoản mới khi chạy agy")
+
+    # Command: remove
+    rem_p = subparsers.add_parser("remove", help="Xóa profile đã lưu")
+    rem_p.add_argument("email", help="Email tài khoản cần xóa khỏi danh sách profile")
+
+    args = parser.parse_args()
+
+    if not args.command or args.command == "current":
+        curr = get_current_account()
+        if curr["email"]:
+            print(f"Tài khoản đang hoạt động: {curr['email']} ({curr['auth_method']})")
+            if curr.get("expiry"):
+                print(f"Hạn token: {curr['expiry']}")
+        else:
+            print("Chưa có tài khoản nào đăng nhập.")
+
+    elif args.command == "list":
+        profiles = list_profiles()
+        if getattr(args, "json", False):
+            print(json.dumps(profiles, ensure_ascii=False, indent=2))
+        else:
+            if not profiles:
+                print("Chưa có profile nào được lưu. Dùng 'agy-account save' để lưu tài khoản hiện tại.")
+            else:
+                print("Danh sách tài khoản Antigravity:")
+                for p in profiles:
+                    marker = " -> [ACTIVE]" if p["is_active"] else "   "
+                    print(f"{marker} {p['email']} (Lần lưu cuối: {p['last_saved']})")
+
+    elif args.command == "save":
+        try:
+            saved_dir = save_current_profile(args.email)
+            email = args.email or get_active_email()
+            print(f"Đã lưu profile tài khoản '{email}' vào: {saved_dir}")
+        except Exception as e:
+            print(f"Lỗi: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.command == "switch":
+        try:
+            switch_profile(args.email)
+            print(f"Đã chuyển sang tài khoản: {args.email}")
+        except Exception as e:
+            print(f"Lỗi khi chuyển tài khoản: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.command == "add":
+        current_email = get_active_email()
+        if current_email:
+            try:
+                save_current_profile(current_email)
+                print(f"Đã tự động lưu sao lưu tài khoản hiện tại: {current_email}")
+            except Exception:
+                pass
+
+        delete_keyring_secret()
+        if os.path.exists(GOOGLE_ACCOUNTS_FILE):
+            with open(GOOGLE_ACCOUNTS_FILE, "w", encoding="utf-8") as f:
+                json.dump({"active": "", "old": [current_email] if current_email else []}, f, indent=2)
+        if os.path.exists(OAUTH_CREDS_FILE):
+            try:
+                os.remove(OAUTH_CREDS_FILE)
+            except Exception:
+                pass
+
+        print("Đã làm mới phiên đăng nhập.")
+        print("Vui lòng khởi chạy 'agy' để đăng nhập tài khoản Google mới qua trình duyệt.")
+        print("Sau khi đăng nhập thành công, chạy 'agy-account save' để lưu tài khoản mới vào danh sách.")
+
+    elif args.command == "remove":
+        if remove_profile(args.email):
+            print(f"Đã xóa profile: {args.email}")
+        else:
+            print(f"Không tìm thấy profile cho: {args.email}")
+
+
+if __name__ == "__main__":
+    main()
