@@ -47,7 +47,7 @@
 
 1. Clone dự án về máy:
    ```bash
-   git clone https://github.com/<your-username>/agyu.git
+   git clone https://github.com/dinhquoctoan168/agyu.git
    cd agyu
    ```
 
