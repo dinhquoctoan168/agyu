@@ -75,6 +75,16 @@
   const accountEmailEl = document.getElementById("account-email");
   const accountDropdownEl = document.getElementById("account-dropdown");
   const accountListEl = document.getElementById("account-list");
+  const btnAccountSaveEl = document.getElementById("btn-account-save");
+  const btnAccountAddEl = document.getElementById("btn-account-add");
+
+  // Account Modal Elements
+  const accountModalEl = document.getElementById("account-modal");
+  const accountModalTitleEl = document.getElementById("account-modal-title");
+  const accountModalTextEl = document.getElementById("account-modal-text");
+  const accountModalSubtextEl = document.getElementById("account-modal-subtext");
+  const btnAccountModalCancelEl = document.getElementById("btn-account-modal-cancel");
+  const btnAccountModalConfirmEl = document.getElementById("btn-account-modal-confirm");
 
   // Active Processes Elements (Above Input Box)
   const activeProcessesStripEl = document.getElementById("active-processes-strip");
@@ -288,8 +298,12 @@
       }
     }
     cleanPath = cleanPath.replace(/[.,;:]+$/, "").trim();
+    const isFolder = decodedHref.replace(/[#?].*$/, "").trim().endsWith("/") || rawHref.trim().endsWith("/");
+    if (isFolder && cleanPath.length > 1 && cleanPath.endsWith("/")) {
+      cleanPath = cleanPath.slice(0, -1);
+    }
     const filename = cleanPath.split("/").filter(Boolean).pop() || cleanPath;
-    return { cleanPath, lineHash, filename };
+    return { cleanPath, lineHash, filename, isFolder };
   }
 
   // Helper to render KaTeX formula
@@ -343,19 +357,31 @@
 
     processed = escapeHtml(processed);
 
-    // 1. Convert [label](file:///path/to/file) to compact file link (safe [^\]\n]+, supports parens in URL & <...>)
+    // 1. Convert [label](file:///path/to/file) to compact file/folder link (safe [^\]\n]+, supports parens in URL & <...>)
     processed = processed.replace(/\[\s*([^\]\n]+?)\s*\]\(\s*(?:<([^>\n]+)>|&lt;([^>\n]+)&gt;|(file:\/\/(?:[^\s()]|\([^\s()]*\))+?))\s*(?:\s+(?:&quot;(?:(?!&quot;)[^\n])*&quot;|&#039;(?:(?!&#039;)[^\n])*&#039;|"[^"\n]*"|'[^'\n]*'))?\s*\)/g, function(match, label, urlAngle, urlEscapedAngle, urlBare) {
       const rawHref = urlAngle || urlEscapedAngle || urlBare;
-      const { cleanPath, lineHash, filename } = parseFileHref(rawHref);
-      const displayLabel = filename + (lineHash ? ` (${lineHash.replace('#', '')})` : "");
-      return `<span class="file-link" data-filepath="${escapeHtml(cleanPath)}" title="${escapeHtml(cleanPath + lineHash)}">📄 ${escapeHtml(displayLabel)}</span>`;
+      const { cleanPath, lineHash, filename, isFolder } = parseFileHref(rawHref);
+      const icon = isFolder ? "📁" : "📄";
+      const cleanLabel = unescapeHtml(label || "").replace(/^`+|`+$/g, "").trim();
+      const displayLabel = (cleanLabel && !cleanLabel.startsWith("file://"))
+        ? (cleanLabel + (lineHash && !cleanLabel.includes('#') && !cleanLabel.includes('(') ? ` (${lineHash.replace('#', '')})` : ""))
+        : (filename + (lineHash ? ` (${lineHash.replace('#', '')})` : ""));
+      return `<span class="file-link" data-filepath="${escapeHtml(cleanPath)}" data-is-folder="${isFolder ? "true" : "false"}" title="${escapeHtml(cleanPath + lineHash)}">${icon} ${escapeHtml(displayLabel)}</span>`;
     });
 
     // 2. Convert raw/bare file:// URLs not inside quotes/attributes (supports balanced parens)
-    processed = processed.replace(/(?<!data-filepath="|title="|href=")file:\/\/(?:[^\s<>&"'()]|\([^\s<>&"'()]*\))+/g, function(match) {
-      const { cleanPath, lineHash, filename } = parseFileHref(match);
+    processed = processed.replace(/(?<!data-filepath="|title="|href=")file:\/\/(?:[^\s<>&"'()*_`~]|\([^\s<>&"'()*_`~]*\))+/g, function(match) {
+      let url = match;
+      let trailing = "";
+      const m = url.match(/[\*\_~`.,;:!?]+$/);
+      if (m) {
+        trailing = m[0];
+        url = url.slice(0, -trailing.length);
+      }
+      const { cleanPath, lineHash, filename, isFolder } = parseFileHref(url);
+      const icon = isFolder ? "📁" : "📄";
       const displayLabel = filename + (lineHash ? ` (${lineHash.replace('#', '')})` : "");
-      return `<span class="file-link" data-filepath="${escapeHtml(cleanPath)}" title="${escapeHtml(cleanPath + lineHash)}">📄 ${escapeHtml(displayLabel)}</span>`;
+      return `<span class="file-link" data-filepath="${escapeHtml(cleanPath)}" data-is-folder="${isFolder ? "true" : "false"}" title="${escapeHtml(cleanPath + lineHash)}">${icon} ${escapeHtml(displayLabel)}</span>` + trailing;
     });
 
     // 3. Convert [label](https://...) to web link (safe [^\]\n]+, supports parens in URL & <...>)
@@ -365,10 +391,10 @@
     });
 
     // 3b. Convert bare https?:// URLs not inside quotes/attributes to web link
-    processed = processed.replace(/(?<!(?:href="|href='|data-filepath="|title="|">|&gt;))https?:\/\/(?:[^\s<>&"'()]|\([^\s<>&"'()]*\))+/g, function(match) {
+    processed = processed.replace(/(?<!(?:href="|href='|data-filepath="|title="|">|&gt;))https?:\/\/(?:[^\s<>&"'()*_`~]|\([^\s<>&"'()*_`~]*\))+/g, function(match) {
       let url = match;
       let trailing = "";
-      const m = url.match(/[.,;:!?]+$/);
+      const m = url.match(/[\*\_~`.,;:!?]+$/);
       if (m) {
         trailing = m[0];
         url = url.slice(0, -trailing.length);
@@ -718,6 +744,55 @@
     });
   }
 
+  // Account Modal Helpers
+  let accountModalCallback = null;
+  function showAccountModal(title, text, subtext, confirmText, isDanger, onConfirm) {
+    if (!accountModalEl) return;
+    if (accountModalTitleEl) accountModalTitleEl.textContent = title;
+    if (accountModalTextEl) accountModalTextEl.innerHTML = text;
+    if (accountModalSubtextEl) {
+      if (subtext) {
+        accountModalSubtextEl.innerHTML = subtext;
+        accountModalSubtextEl.classList.remove("hidden");
+      } else {
+        accountModalSubtextEl.classList.add("hidden");
+      }
+    }
+    if (btnAccountModalConfirmEl) {
+      btnAccountModalConfirmEl.textContent = confirmText || "Xác nhận";
+      if (isDanger) {
+        btnAccountModalConfirmEl.classList.add("btn-danger");
+      } else {
+        btnAccountModalConfirmEl.classList.remove("btn-danger");
+      }
+    }
+    accountModalCallback = onConfirm;
+    accountModalEl.classList.remove("hidden");
+  }
+
+  function closeAccountModal() {
+    if (accountModalEl) {
+      accountModalEl.classList.add("hidden");
+    }
+    accountModalCallback = null;
+  }
+
+  if (btnAccountModalCancelEl) {
+    btnAccountModalCancelEl.addEventListener("click", function() {
+      closeAccountModal();
+    });
+  }
+
+  if (btnAccountModalConfirmEl) {
+    btnAccountModalConfirmEl.addEventListener("click", function() {
+      const cb = accountModalCallback;
+      closeAccountModal();
+      if (typeof cb === "function") {
+        cb();
+      }
+    });
+  }
+
   // Account Selector UI & Events
   function updateAccountsUI(data) {
     if (!data) return;
@@ -743,15 +818,47 @@
         const emailSpan = document.createElement("span");
         emailSpan.className = "account-item-email";
         emailSpan.textContent = p.email;
-
         item.appendChild(emailSpan);
+
+        const actionsSpan = document.createElement("div");
+        actionsSpan.className = "account-item-actions";
 
         if (p.is_active) {
           const checkSpan = document.createElement("span");
           checkSpan.className = "account-item-check";
           checkSpan.textContent = "✓";
-          item.appendChild(checkSpan);
-        } else {
+          checkSpan.title = "Tài khoản đang hoạt động";
+          actionsSpan.appendChild(checkSpan);
+        }
+
+        // Delete profile button
+        const delBtn = document.createElement("button");
+        delBtn.className = "account-item-del";
+        delBtn.innerHTML = "🗑️";
+        delBtn.title = `Xóa tài khoản ${p.email} khỏi danh sách đã lưu`;
+        delBtn.addEventListener("click", function(e) {
+          e.stopPropagation();
+          toggleAccountDropdown(false);
+          showAccountModal(
+            "Xóa profile tài khoản",
+            `Bạn có chắc chắn muốn xóa tài khoản <strong>${escapeHtml(p.email)}</strong> khỏi danh sách đã lưu?`,
+            "Thao tác này chỉ xóa bản sao lưu profile trên máy, không ảnh hưởng tài khoản Google.",
+            "Xóa profile",
+            true,
+            function() {
+              showToast(`Đang xóa tài khoản ${p.email}...`);
+              postToPython({
+                action: "remove_account",
+                email: p.email
+              });
+            }
+          );
+        });
+        actionsSpan.appendChild(delBtn);
+
+        item.appendChild(actionsSpan);
+
+        if (!p.is_active) {
           item.addEventListener("click", function(e) {
             e.stopPropagation();
             toggleAccountDropdown(false);
@@ -784,6 +891,36 @@
     accountBadgeEl.addEventListener("click", function(e) {
       e.stopPropagation();
       toggleAccountDropdown();
+    });
+  }
+
+  if (btnAccountSaveEl) {
+    btnAccountSaveEl.addEventListener("click", function(e) {
+      e.stopPropagation();
+      showToast("Đang lưu snapshot tài khoản hiện tại...");
+      postToPython({
+        action: "save_account"
+      });
+    });
+  }
+
+  if (btnAccountAddEl) {
+    btnAccountAddEl.addEventListener("click", function(e) {
+      e.stopPropagation();
+      toggleAccountDropdown(false);
+      showAccountModal(
+        "Thêm tài khoản Google",
+        "Bạn muốn đăng nhập thêm tài khoản Google mới?",
+        "Tài khoản hiện tại sẽ được tự động lưu snapshot dự phòng. Trình duyệt web sẽ tự động mở để bạn đăng nhập Google. Sau khi đăng nhập thành công, tài khoản mới sẽ tự động được kết nối và lưu vào danh sách.",
+        "Mở đăng nhập Google",
+        false,
+        function() {
+          showToast("Đang mở trình duyệt để đăng nhập Google...", 6000);
+          postToPython({
+            action: "add_account"
+          });
+        }
+      );
     });
   }
 
@@ -942,7 +1079,7 @@
 
     function parseSection(keyword) {
       const headerPattern = "(?:-\\s*[*_]*File[^\\n:]*?" + keyword + "[^\\n:]*:?|File[^\\n:]*?" + keyword + "[^\\n:]*:?)";
-      const nextHeaderPattern = "(?=(?:-\\s*[*_]*File|###|\\n\\n--|\\n\\n[A-Z0-9#]|$))";
+      const nextHeaderPattern = "(?=(?:-\\s*[*_]*File|###|\\n\\n--|\\n\\n#+|$))";
       const regex = new RegExp(headerPattern + "[\\s\\S]*?" + nextHeaderPattern, "i");
       const match = text.match(regex);
       if (!match) return [];
@@ -975,8 +1112,7 @@
       const codeRegex = /`([^`\n]+)`/g;
       while ((m = codeRegex.exec(block)) !== null) {
         const p = m[1].trim();
-        const isDotfile = /^\.[a-zA-Z0-9_.-]+$/.test(p);
-        if (p.includes("/") || validExtRegex.test(p) || isDotfile) {
+        if (p.includes("/") || validExtRegex.test(p)) {
           if (p.includes(" ") && !validExtRegex.test(p)) continue;
           const cleanPath = p.replace(/^file:\/\/+/, "/");
           const filename = cleanPath.split("/").filter(Boolean).pop() || cleanPath;
@@ -2721,6 +2857,28 @@
       showToast(`Đã chuyển sang tài khoản: ${msg.email}`);
     }
 
+    else if (type === "account_saved") {
+      showToast(msg.message || "Đã lưu snapshot tài khoản hiện tại vào danh sách.");
+    }
+
+    else if (type === "account_removed") {
+      showToast(msg.message || `Đã xóa tài khoản: ${msg.email}`);
+    }
+
+    else if (type === "account_add_started") {
+      showToast(msg.message || "Đang mở trình duyệt để đăng nhập Google...", 6000);
+    }
+
+    else if (type === "account_added") {
+      closeAccountModal();
+      showToast(msg.message || `Đã thêm tài khoản mới ${msg.email} thành công!`, 5000);
+    }
+
+    else if (type === "account_add_cancelled") {
+      closeAccountModal();
+      showToast(msg.message || "Đã hủy tiến trình đăng nhập tài khoản mới.", 4000);
+    }
+
     else if (type === "init_info") {
       currentWorkspace = msg.cwd;
       workspaceNameEl.textContent = msg.dir_name;
@@ -3116,15 +3274,16 @@
     }
   }
 
-  // Left click on file link -> Open file directly
+  // Left click on file/folder link -> Open directly
   // Left click on web link -> Open with external browser via Python
   document.addEventListener("click", function(e) {
     const fileLink = e.target.closest(".file-link");
     if (fileLink) {
       const filePath = fileLink.dataset.filepath;
+      const isFolder = fileLink.dataset.isFolder === "true";
       if (filePath) {
         postToPython({
-          action: "open_file",
+          action: isFolder ? "open_folder" : "open_file",
           path: filePath
         });
       }

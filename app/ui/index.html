@@ -236,6 +236,24 @@
     </div>
   </div>
 
+  <!-- Account Management Confirmation Modal -->
+  <div id="account-modal" class="account-modal-overlay hidden">
+    <div class="account-modal-card">
+      <div class="account-modal-header">
+        <span class="account-modal-icon" id="account-modal-icon">👤</span>
+        <h3 class="account-modal-title" id="account-modal-title">Quản lý tài khoản</h3>
+      </div>
+      <div class="account-modal-body" id="account-modal-body">
+        <p id="account-modal-text"></p>
+        <div id="account-modal-subtext" class="account-modal-subtext"></div>
+      </div>
+      <div class="account-modal-actions">
+        <button id="btn-account-modal-cancel" class="btn-account-modal btn-cancel">Hủy</button>
+        <button id="btn-account-modal-confirm" class="btn-account-modal btn-confirm">Xác nhận</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Main App Container -->
   <div class="app-container">
     <!-- Header -->
@@ -265,12 +283,18 @@
             <span class="account-arrow">▾</span>
           </div>
           <div class="account-dropdown hidden" id="account-dropdown">
-            <div class="account-dropdown-header">Tài khoản Antigravity</div>
+            <div class="account-dropdown-header">
+              <span>Tài khoản Antigravity</span>
+              <button class="account-btn-save-sm" id="btn-account-save" title="Lưu snapshot tài khoản đang hoạt động vào danh sách profile">💾 Lưu</button>
+            </div>
             <div class="account-list" id="account-list">
               <!-- Rendered via JS -->
             </div>
             <div class="account-dropdown-footer">
-              <span class="account-hint">Dùng lệnh <code>agy-account</code> trên terminal để thêm/quản lý tài khoản.</span>
+              <button class="account-btn-add" id="btn-account-add" title="Thêm tài khoản Google mới qua trình duyệt">
+                <span class="account-add-icon">➕</span>
+                <span>Thêm tài khoản mới</span>
+              </button>
             </div>
           </div>
         </div>

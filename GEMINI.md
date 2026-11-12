@@ -13,6 +13,12 @@
   - Kiểm tra thông tin.
   - Đưa ra phương án xử lý.
   - Chỉ đề xuất các bước cần thiết.
+- **Quy chuẩn hiển thị liên kết (bắt buộc tuân thủ 100% để trích xuất chính xác)**:
+  - **Link Web**: Bắt buộc dùng `[Tên hiển thị](https://...)` hoặc `<https://...>`.
+    - Tuyệt đối cấm viết URL trần dính chữ/dấu câu, hoặc bọc ký tự markdown như `**https://...**` hay `*https://...*`.
+    - Nếu muốn in đậm link, phải in đậm bên ngoài thẻ link: `**[Tên hiển thị](https://...)**`.
+  - **Link Tệp tin (File)**: Bắt buộc dùng cú pháp `[Tên tệp](file:///đường_dẫn_tuyệt_đối/tên_file.ext#Ldòng)`. Ví dụ: [`app.js`](file:///mnt/Work/03_Resources/Tools/agy_wrap/app/ui/app.js#L10).
+  - **Link Thư mục (Folder)**: Bắt buộc dùng cú pháp `[Tên thư mục](file:///đường_dẫn_tuyệt_đối/tên_thư_mục/)` (kết thúc bằng dấu `/` để hệ thống nhận diện thư mục). Ví dụ: [Thư mục app](file:///mnt/Work/03_Resources/Tools/agy_wrap/app/).
 
 ## 2. Quy định hành động
 - Mặc định, mọi nội dung người dùng nói đều chỉ mang tính **thảo luận**.

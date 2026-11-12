@@ -69,7 +69,6 @@ class AntigravityApp:
         self.is_free_to_go = False
         self.active_action_id = None
         self._ensure_guardrail_hook()
-        self._ensure_default_rules()
         self.update_session_registry()
 
         # Setup GTK Window
@@ -134,24 +133,6 @@ class AntigravityApp:
 
         # Periodic Child Process check (every 3 seconds)
         GLib.timeout_add_seconds(3, self._periodic_proc_check)
-
-    def _ensure_default_rules(self):
-        gemini_dir = os.path.expanduser("~/.gemini")
-        os.makedirs(gemini_dir, exist_ok=True)
-        global_gemini_path = os.path.join(gemini_dir, "GEMINI.md")
-
-        # Do not overwrite if user already has a global GEMINI.md
-        if os.path.isfile(global_gemini_path):
-            return
-
-        # Find bundled GEMINI.md in repository root
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        bundled_gemini = os.path.join(project_root, "GEMINI.md")
-        if os.path.isfile(bundled_gemini):
-            try:
-                shutil.copy2(bundled_gemini, global_gemini_path)
-            except Exception as e:
-                print(f"[_ensure_default_rules Error] {e}", file=sys.stderr)
 
     def _ensure_guardrail_hook(self):
         hook_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "guardrail_hook.py")
@@ -701,7 +682,7 @@ class AntigravityApp:
 
     def calculate_quota(self):
         try:
-            agy_bin = os.environ.get("AGY_BIN") or shutil.which("agy") or ("/mnt/Agent/bin/agy" if os.path.isfile("/mnt/Agent/bin/agy") else "agy")
+            agy_bin = shutil.which("agy") or "/mnt/Agent/bin/agy"
             cmd = [agy_bin, "-p", "/quota", "--output-format", "json"]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=12)
             if res.returncode != 0:
@@ -1166,6 +1147,141 @@ class AntigravityApp:
                             "message": f"Lỗi chuyển tài khoản: {res.stderr.strip()}"
                         })
                 threading.Thread(target=do_switch, daemon=True).start()
+
+            elif action == "save_account":
+                def do_save():
+                    bin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "agy-account")
+                    res = subprocess.run([bin_path, "save"], capture_output=True, text=True, timeout=8)
+                    if res.returncode == 0:
+                        self.send_accounts_update()
+                        GLib.idle_add(self.send_to_js, {
+                            "type": "account_saved",
+                            "message": "Đã lưu snapshot tài khoản hiện tại vào danh sách."
+                        })
+                    else:
+                        GLib.idle_add(self.send_to_js, {
+                            "type": "error",
+                            "message": f"Lỗi lưu tài khoản: {res.stderr.strip() or res.stdout.strip()}"
+                        })
+                threading.Thread(target=do_save, daemon=True).start()
+
+            elif action == "remove_account":
+                target_email = data.get("email")
+                def do_remove():
+                    bin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "agy-account")
+                    res = subprocess.run([bin_path, "remove", target_email], capture_output=True, text=True, timeout=8)
+                    if res.returncode == 0:
+                        self.send_accounts_update()
+                        GLib.idle_add(self.send_to_js, {
+                            "type": "account_removed",
+                            "email": target_email,
+                            "message": f"Đã xóa tài khoản {target_email} khỏi danh sách đã lưu."
+                        })
+                    else:
+                        GLib.idle_add(self.send_to_js, {
+                            "type": "error",
+                            "message": f"Lỗi xóa tài khoản: {res.stderr.strip()}"
+                        })
+                threading.Thread(target=do_remove, daemon=True).start()
+
+            elif action == "cancel_add_account":
+                self._cancel_add_account = True
+
+            elif action == "add_account":
+                self._cancel_add_account = False
+                def do_add():
+                    bin_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "agy-account")
+                    agy_bin = os.environ.get("AGY_BIN") or shutil.which("agy") or ("/mnt/Agent/bin/agy" if os.path.isfile("/mnt/Agent/bin/agy") else "agy")
+
+                    prev_info = self.get_accounts_info()
+                    prev_email = prev_info.get("active_email")
+
+                    # 1. Chạy agy-account add để sao lưu tài khoản cũ và reset session
+                    res = subprocess.run([bin_path, "add"], capture_output=True, text=True, timeout=10)
+                    if res.returncode != 0:
+                        GLib.idle_add(self.send_to_js, {
+                            "type": "error",
+                            "message": f"Không thể chuẩn bị phiên đăng nhập mới: {res.stderr.strip()}"
+                        })
+                        return
+
+                    # 2. Dừng tiến trình agy hiện tại
+                    self.stop_agy_process()
+                    GLib.idle_add(self.send_to_js, {
+                        "type": "account_add_started",
+                        "message": "Đang mở trình duyệt để đăng nhập tài khoản Google..."
+                    })
+
+                    # 3. Mở agy để kích hoạt OAuth browser
+                    term_cmd = None
+                    for t in ["gnome-terminal", "x-terminal-emulator", "konsole", "xfce4-terminal", "xterm"]:
+                        if shutil.which(t):
+                            term_cmd = t
+                            break
+
+                    try:
+                        if term_cmd == "gnome-terminal":
+                            subprocess.Popen([
+                                "gnome-terminal",
+                                "--title=Đăng nhập tài khoản Google Antigravity",
+                                "--",
+                                "bash", "-c",
+                                f"echo 'Đang mở trình duyệt đăng nhập Google...'; {agy_bin} -p 'ping'; sleep 2"
+                            ])
+                        elif term_cmd:
+                            subprocess.Popen([
+                                term_cmd,
+                                "-e",
+                                f"bash -c \"echo 'Đang mở trình duyệt đăng nhập Google...'; {agy_bin} -p 'ping'; sleep 2\""
+                            ])
+                        else:
+                            subprocess.Popen([agy_bin, "-p", "ping"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    except Exception as e:
+                        print(f"[add_account spawn error] {e}", file=sys.stderr)
+
+                    # 4. Giám sát đợi tài khoản mới được kích hoạt (tối đa 120s)
+                    start_time = time.time()
+                    new_email = None
+                    while time.time() - start_time < 120:
+                        if getattr(self, "_cancel_add_account", False):
+                            break
+                        time.sleep(2)
+                        chk = subprocess.run([bin_path, "current"], capture_output=True, text=True, timeout=5)
+                        if chk.returncode == 0 and "Tài khoản đang hoạt động:" in chk.stdout:
+                            lines = [l for l in chk.stdout.splitlines() if "Tài khoản đang hoạt động:" in l]
+                            if lines:
+                                parts = lines[0].split("Tài khoản đang hoạt động:")[1].strip().split()
+                                if parts:
+                                    cand = parts[0]
+                                    if cand != prev_email or prev_email is None:
+                                        # Snapshot profile mới
+                                        subprocess.run([bin_path, "save", cand], capture_output=True, text=True, timeout=8)
+                                        new_email = cand
+                                        break
+
+                    if new_email:
+                        self.send_accounts_update()
+                        self.start_agy_process()
+                        self.send_quota_update()
+                        GLib.idle_add(self.send_to_js, {
+                            "type": "account_added",
+                            "email": new_email,
+                            "message": f"Đã đăng nhập và kích hoạt tài khoản {new_email} thành công!"
+                        })
+                    else:
+                        # Nếu hủy hoặc timeout, khôi phục lại tài khoản trước đó nếu có
+                        if prev_email:
+                            subprocess.run([bin_path, "switch", prev_email], capture_output=True, text=True, timeout=8)
+                        self.send_accounts_update()
+                        self.start_agy_process()
+                        self.send_quota_update()
+                        msg = "Đã hủy đăng nhập tài khoản mới." if getattr(self, "_cancel_add_account", False) else "Quá thời gian chờ đăng nhập hoặc người dùng chưa hoàn tất trên trình duyệt."
+                        GLib.idle_add(self.send_to_js, {
+                            "type": "account_add_cancelled",
+                            "message": msg
+                        })
+
+                threading.Thread(target=do_add, daemon=True).start()
 
             elif action == "refresh_quota":
                 threading.Thread(target=self.send_quota_update, daemon=True).start()
